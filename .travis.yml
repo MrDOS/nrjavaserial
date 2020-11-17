@@ -72,7 +72,7 @@ jobs:
                      --user $(id --user):$(id --group) \
                      --name build \
                      --env JAVA_HOME=$JAVA_HOME \
-                     --volume $(pwd):/build \
+                     --volume $(pwd)/src/main/c:/workdir \
                      --volume $JAVA_HOME:$JAVA_HOME:ro \
                      empterdose/freebsd-cross-build:9.3
 
@@ -87,9 +87,9 @@ jobs:
         # wasting time installing Java inside the container.
         - sudo ln -s $JAVA_HOME/include/linux $JAVA_HOME/include/freebsd
       script:
-        - docker exec build make -C /build/src/main/c clean-freebsd
-        - docker exec build settarget i386-freebsd9 make -C /build/src/main/c -j freebsd32
-        - docker exec build settarget x86_64-freebsd9 make -C /build/src/main/c -j freebsd64
+        - docker exec build make clean-freebsd
+        - docker exec build settarget i386-freebsd9 make -j freebsd32
+        - docker exec build settarget x86_64-freebsd9 make -j freebsd64
 
       addons:
         artifacts:
