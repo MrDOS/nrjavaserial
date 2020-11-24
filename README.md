@@ -114,6 +114,13 @@ to the path of your Java installation directory.
     $ make ppc
 
     # Build 64-bit x86 macOS binaries. This requires a macOS build host.
+    $ make osxintel
+    # Build AArch64 (“Apple Silicon”) macOS binaries. This requires a macOS
+    # build host, Xcode 12.2+, and an AArch64 JDK in JAVA_HOME.
+    $ make osxarm64
+    # Build a macOS Universal Binary containing the Intel and AArch64 builds of
+    # the library. This requires a macOS build host, and that both of the
+    # architecture-specific libraries have already been built.
     $ make osx
 
     # Build 32- and 64-bit x86 FreeBSD binaries, or just for 32/64-bit,
