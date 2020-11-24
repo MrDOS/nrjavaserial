@@ -51,7 +51,7 @@ jobs:
 
   natives-macos:
     name: macOS native library compilation
-    runs-on: macos-10.15
+    runs-on: macos-latest
 
     defaults:
       run:
@@ -60,15 +60,64 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@v2
-      - name: Setup Java
+
+      - name: Setup Java (Intel)
         uses: actions/setup-java@v1
         with:
           java-version: 8
-
-      - name: Build the macOS native libraries
+      - name: Build the macOS native libraries (Intel)
         run: |
           make clean-osx
-          make osx
+          make osxintel
+
+      # Xcode 12.2 is the minimum version with support for Apple Silicon. This
+      # invocation should be removed once the default Xcode version for the
+      # `macos-latest` virtual environment meets our minimum. See the “Included
+      # Software” link for the `macos-latest` environment in the table of
+      # available environments at
+      # https://github.com/actions/virtual-environments/#available-environments.
+      # Likewise, explicitly targeting macOS 11.0 should be removed once the
+      # default is that version or greater.
+      - name: Switch to Xcode 12.2/macOS 11.0 SDK
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_12.2.app"
+          echo "SDKROOT=$(xcrun --sdk macosx11.0 --show-sdk-path)" >>"$GITHUB_ENV"
+
+      # The actions/setup-java@v1 action currently only supports x86/x86_64.
+      # Once it supports AArch64 on macOS, we should use it instead of this
+      # manual retrieval.
+      - name: Setup Java (AArch64)
+        run: |
+          # Don't want to make a mess in the working directory.
+          cd /tmp
+          # We ought to use the Azul Zulu OpenJDK Discovery API for this, but
+          # it doesn't support AArch64 on macOS yet either. For now, we'll
+          # scrape the download page like jerks.
+          download_page="$(curl -sL https://www.azul.com/downloads/zulu-community/)"
+          # JDK “bandles” (bands of bundles? Typo?) are defined as JSON in the
+          # page. They're the value of an object property, so we'll look for
+          # that property, then remove the property name and the `sortArray()`
+          # invocation wrapping the JSON definition.
+          bandles="$(echo "$download_page" 2>/dev/null \
+                          | grep -m 1 "bandles:" \
+                          | perl -p -e 's/bandles:\s*sortArray\(//;s/\),$//')"
+          # Use jq to filter the JSON for the JDK 8 bandle for macOS on
+          # AArch64, and extract its download link.
+          jdk_url="$(echo "$bandles" | jq -r 'map(select((.["category_slug"] == "java-8-lts") and (.["os_slug"] | map(. == "macos") | any) and (.["arch_slug"] == "arm-64-bit")))[0]["bundles"][0]["link"]')"
+          # The archive contains a single top-level directory with the same
+          # name as the archive without an extension.
+          jdk_name="$(echo "$jdk_url" | sed -e 's/.*\///;s/\.zip$//')"
+          # Download and unpack the JDK archive.
+          curl -LJo jdk.zip "$jdk_url"
+          unzip jdk.zip
+          # Set the JAVA_HOME environment variable for subsequent jobs.
+          echo "JAVA_HOME=/tmp/$jdk_name/zulu-8.jdk/Contents/Home" \
+               >>"$GITHUB_ENV"
+      - name: Build the macOS native libraries (AArch64)
+        run: make osxarm64
+
+      - name: Build the macOS Universal Binary
+        run: make osx
 
       - name: Upload macOS native libraries
         uses: actions/upload-artifact@v2
