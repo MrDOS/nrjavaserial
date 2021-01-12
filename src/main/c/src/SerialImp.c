@@ -1637,7 +1637,7 @@ JNIEXPORT void JNICALL RXTXPort(writeArray)( JNIEnv *env,
 		if(result >0){
 			total += result;
 		}
-		report("writeArray()\n");
+		report_verbose("writeArray()\n");
 	}  while ( ( total < count ) && (result < 0 && errno==EINTR ) );
 	if( result < 0 )
 	{
