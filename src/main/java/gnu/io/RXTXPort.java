@@ -659,37 +659,38 @@ public class RXTXPort extends SerialPort
 		switch( event )
 		{
 			case SerialPortEvent.HARDWARE_ERROR:
-			log.debug( "HARDWARE_ERROR " +
+			log.warn( "HARDWARE_ERROR " +
 					monThread.Data + ")" );
-			break;case SerialPortEvent.DATA_AVAILABLE:
-				log.debug( "DATA_AVAILABLE " + monThread.Data + ")" );
+			break;
+			case SerialPortEvent.DATA_AVAILABLE:
+				log.trace( "DATA_AVAILABLE " + monThread.Data + ")" );
 				break;
 			case SerialPortEvent.OUTPUT_BUFFER_EMPTY:
-				log.debug( "OUTPUT_BUFFER_EMPTY " + monThread.Output + ")" );
+				log.trace( "OUTPUT_BUFFER_EMPTY " + monThread.Output + ")" );
 				break;
 			case SerialPortEvent.CTS:
-				log.debug( "CTS " + monThread.CTS + ")" );
+				log.trace( "CTS " + monThread.CTS + ")" );
 				break;
 			case SerialPortEvent.DSR:
-				log.debug( "DSR " + monThread.Output + ")" );
+				log.trace( "DSR " + monThread.Output + ")" );
 				break;
 			case SerialPortEvent.RI:
-				log.debug( "RI " + monThread.RI + ")" );
+				log.trace( "RI " + monThread.RI + ")" );
 				break;
 			case SerialPortEvent.CD:
-				log.debug( "CD " + monThread.CD + ")" );
+				log.trace( "CD " + monThread.CD + ")" );
 				break;
 			case SerialPortEvent.OE:
-				log.debug( "OE " + monThread.OE + ")" );
+				log.trace( "OE " + monThread.OE + ")" );
 				break;
 			case SerialPortEvent.PE:
-				log.debug( "PE " + monThread.PE + ")" );
+				log.trace( "PE " + monThread.PE + ")" );
 				break;
 			case SerialPortEvent.FE:
-				log.debug( "FE " + monThread.FE + ")" );
+				log.trace( "FE " + monThread.FE + ")" );
 				break;
 			case SerialPortEvent.BI:
-				log.debug( "BI " + monThread.BI + ")" );
+				log.trace( "BI " + monThread.BI + ")" );
 				break;
 			default:
 				log.debug( "XXXXXXXXXXXXXX " + event + ")" );
