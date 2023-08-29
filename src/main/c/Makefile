@@ -303,12 +303,7 @@ windows64:
 
 .PHONY: clean
 clean: | clean-intermediaries
-	$(warning The “clean” target only removes intermediary build objects. \
-	          Because not all of the native libraries can be cross-compiled, \
-	          you probably only want to delete the ones for your current \
-	          platform. To remove those, along with the intermediary build \
-	          objects, invoke the appropriate “clean-platform” target: make \
-	          clean-linux|clean-osx|clean-freebsd|clean-windows.)
+	$(call rmdir_r,resources)
 
 .PHONY: clean-%
 clean-%: | clean-intermediaries
