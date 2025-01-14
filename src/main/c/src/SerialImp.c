@@ -3838,7 +3838,8 @@ int lock_monitor_thread(JNIEnv *env, jobject jobj)
 }
 
 /**
- * Signal that the monitor thread is ready for work.
+ * Signal that the monitor thread has finished initialization and
+ * is either ready for work or has thrown a Java exception.
  *
  * In order to signal the condition, the current thread must already hold the
  * write lock.
@@ -3847,35 +3848,35 @@ int lock_monitor_thread(JNIEnv *env, jobject jobj)
  * @param [in] obj an RXTXPort instance
  * @return 0 on success; 1 on error
  */
-int signal_monitor_thread_ready(JNIEnv *env, jobject jobj)
+int signal_monitor_thread_init_completed(JNIEnv *env, jobject jobj)
 {
-	jfieldID monitorThreadReadyField = (*env)->GetFieldID(
+	jfieldID monitorThreadInitCompletedField = (*env)->GetFieldID(
 		env,
 		(*env)->GetObjectClass(env, jobj),
-		"monitorThreadReady",
+		"monitorThreadInitCompleted",
 		"Ljava/util/concurrent/locks/Condition;");
 	if ((*env)->ExceptionCheck(env)) {
 		return 1;
 	}
 
-	jobject monitorThreadReady = (*env)->GetObjectField(
+	jobject monitorThreadInitCompleted = (*env)->GetObjectField(
 		env,
 		jobj,
-		monitorThreadReadyField);
+		monitorThreadInitCompletedField);
 	if ((*env)->ExceptionCheck(env)) {
 		return 1;
 	}
 
 	jmethodID signal = (*env)->GetMethodID(
 		env,
-		(*env)->GetObjectClass(env, monitorThreadReady),
+		(*env)->GetObjectClass(env, monitorThreadInitCompleted),
 		"signal",
 		"()V");
 	if ((*env)->ExceptionCheck(env)) {
 		return 1;
 	}
 
-	(*env)->CallVoidMethod(env, monitorThreadReady, signal);
+	(*env)->CallVoidMethod(env, monitorThreadInitCompleted, signal);
 	if ((*env)->ExceptionCheck(env)) {
 		return 1;
 	}
@@ -4265,6 +4266,7 @@ int initialise_event_info_struct( struct event_info_struct *eis )
 	jobject jobj = *eis->jobj;
 	JNIEnv *env = eis->env;
 	struct event_info_struct *index = master_index;
+	char message[28];
 
 	if ( eis->initialised == 1 )
 		goto end;
@@ -4308,8 +4310,9 @@ int initialise_event_info_struct( struct event_info_struct *eis )
 
 	eis->send_event = (*env)->GetMethodID( env, eis->jclazz, "sendEvent",
 		"(IZ)Z" );
-	if(eis->send_event == NULL){
-		report_error("initialise_event_info_struct: eis->send_event == NULL!\n");
+	if(eis->send_event == NULL) {
+		throw_java_exception(env, MONITOR_INITIALIZATION_EXCEPTION,
+			"initialise_event_info_struct", "eis->send_event == NULL");
 		goto fail;
 	}
 end:
@@ -4320,12 +4323,15 @@ end:
 		eis->tv_sleep.tv_usec = 100 * 1000;
 		eis->initialised = 1;
 		return( 1 );
-	} else if(eis->fd >= FD_SETSIZE ){
-		// you can reduce this limitation only with migration to epool or something like that.
-		report_error("initialise_event_info_struct: eis->fd >= FD_SETSIZE!\n");
-	} else if(eis->fd <= 0 ){
-		// you can reduce this limitation only with migration to epool or something like that.
-		report_error("initialise_event_info_struct: eis->fd <= 0!\n");
+	} else if (eis->fd >= FD_SETSIZE) {
+		// you can reduce this limitation only with migration to poll or something like that.
+		sprintf(message, "fd == %i >= %i", eis->fd, FD_SETSIZE);
+		throw_java_exception(env, MONITOR_INITIALIZATION_EXCEPTION,
+			"initialise_event_info_struct", message);
+	} else if (eis->fd <= 0) {
+		sprintf(message, "fd == %i <= 0", eis->fd);
+		throw_java_exception(env, MONITOR_INITIALIZATION_EXCEPTION,
+			"initialise_event_info_struct", message);
 	}
 fail:
 	finalize_event_info_struct( eis );
@@ -4385,10 +4391,23 @@ JNIEXPORT void JNICALL RXTXPort(eventLoop)( JNIEnv *env, jobject jobj )
 	eis.initialised = 0;
 
 	ENTER( "eventLoop\n" );
+
+	/* If initialisation fails, we throw a Java exception, so the
+	 * Java main thread has a chance to learn what went wrong.
+	 * In that case, the monitor thread must notify the main thread
+	 * and release the lock to avoid blocking the main thread
+	 * indefinitely.
+	 * We must also defer the notify/unlock sequence at least until
+	 * the info that something went wrong has been made available
+	 * to the main thread (via the `pendingException` field), so that
+	 * when the main thread returns from `await`, it gets a chance
+	 * to know that it has to bail and not enter its main loop.
+	 * Due to that constraint, let the Java catch block be responsible
+	 * for the notify/unlock dance if initialisation fails. */
 	if ( !initialise_event_info_struct( &eis ) ) goto end;
 	if ( !init_threads( &eis ) ) goto end;
 
-	if (signal_monitor_thread_ready(env, jobj)) goto end;
+	if (signal_monitor_thread_init_completed(env, jobj)) goto end;
 	if (unlock_monitor_thread(env, jobj)) goto end;
 
 	do{

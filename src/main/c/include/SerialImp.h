@@ -416,6 +416,7 @@ printf("%8li sec : %8li usec\n", enow.tv_sec - snow.tv_sec, enow.tv_sec - snow.t
 #define OUT_OF_MEMORY "java/lang/OutOfMemoryError"
 #define IO_EXCEPTION "java/io/IOException"
 #define PORT_IN_USE_EXCEPTION "gnu/io/PortInUseException"
+#define MONITOR_INITIALIZATION_EXCEPTION "gnu/io/MonitorInitializationException"
 
 /* some popular releases of Slackware do not have SSIZE_MAX */
 

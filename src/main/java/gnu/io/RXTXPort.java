@@ -62,6 +62,7 @@ import java.io.IOException;
 import java.util.TooManyListenersException;
 import java.lang.Math;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -94,6 +95,12 @@ public class RXTXPort extends SerialPort
 		private volatile boolean Data=false;
 		private volatile boolean Output=false;
 
+		/**
+		 * Whether an exception occurred during initialization.
+		 * The controlling thread may read and propagate it.
+		 */
+		private final AtomicReference<MonitorInitializationException> pendingException = new AtomicReference<>();
+
 		MonitorThread() 
 		{
 			if (debug)
@@ -112,7 +119,17 @@ public class RXTXPort extends SerialPort
 	            eis = 0;
 				if (debug)
 					z.reportln( "eventLoop() returned, this is invalid."); 
-			}catch(Throwable ex) {
+			} catch (MonitorInitializationException ex) {
+				if (debug) {
+					z.reportln("Error while initializing monitor thread; propagating.");
+				}
+				monThreadisInterrupted=true;
+				this.pendingException.set(ex);
+				if (monitorThreadState.isWriteLockedByCurrentThread()) {
+					monitorThreadInitCompleted.signal();
+					monitorThreadState.writeLock().unlock();
+				}
+			} catch (Throwable ex) {
 				HARDWARE_FAULT=true;
 				sendEvent(SerialPortEvent.HARDWARE_ERROR, true);
 			}
@@ -121,6 +138,14 @@ public class RXTXPort extends SerialPort
 		{ 
 			if (debug)
 				z.reportln( "RXTXPort:MonitorThread exiting"); 
+		}
+
+		/**
+		 * Atomically clears and returns a pending exception if initialization has failed.
+		 * @return an exception if one is pending, <code>null</code> otherwise.
+		 */
+		public MonitorInitializationException popPendingException() {
+			return pendingException.getAndSet(null);
 		}
 	}
 	protected boolean HARDWARE_FAULT=false;
@@ -180,11 +205,16 @@ public class RXTXPort extends SerialPort
 			monThread.setName("RXTXPortMonitor("+name+")");
 			monThread.start();
 			try {
-				this.monitorThreadReady.await();
+				this.monitorThreadInitCompleted.await();
 			} catch (InterruptedException e) {
 				z.reportln("Interrupted while waiting for the monitor thread to start!");
 			}
 			this.monitorThreadState.writeLock().unlock();
+			MonitorInitializationException exception = monThread.popPendingException();
+			if (exception != null) {
+				close();
+				throw exception;
+			}
 	//	} catch ( PortInUseException e ){}
 		timeout = -1;	/* default disabled timeout */
 		if (debug)
@@ -692,11 +722,16 @@ public class RXTXPort extends SerialPort
 	private final Lock monitorThreadStateWriteLock = this.monitorThreadState.writeLock();
 
 	/**
-	 * Signalled by JNI code from inside {@link #eventLoop()} when the event
-	 * loop has finished initialization of the native data structures and is
-	 * ready to service events.
+	 * <p>Signalled by JNI code from inside {@link #eventLoop()} when the event
+	 * loop has finished initialization of the native data structures.</p>
+	 *
+	 * <p>This either means that initialization was successful (and the
+	 * event loop is ready to service events) or an exception occurred
+	 * during initialization.
+	 * In the latter case, {@link MonitorThread#pendingException} contains
+	 * a non-null value.</p>
 	 */
-	private final Condition monitorThreadReady = this.monitorThreadState.writeLock().newCondition();
+	private final Condition monitorThreadInitCompleted = this.monitorThreadState.writeLock().newCondition();
 
 	/** Process SerialPortEvents */
 	native void eventLoop();
@@ -704,8 +739,8 @@ public class RXTXPort extends SerialPort
 	/**
 	 * Whether the monitor thread has been interrupted.
 	 *
-	 * The flag is cleared when the monitor thread is started, and set by the
-	 * native code in {@ #interruptEventLoop()}.
+	 * The flag is cleared when the monitor thread is started. It is set either
+	 * by the native code in {@link #interruptEventLoop()} or if initialization fails.
 	 */
 	boolean monThreadisInterrupted=true;
 
@@ -911,9 +946,13 @@ public class RXTXPort extends SerialPort
 			monThread.setName("RXTXPortMonitor("+name+")");
 			monThread.start();
 			try {
-				this.monitorThreadReady.await();
+				this.monitorThreadInitCompleted.await();
 			} catch (InterruptedException e) {
 				z.reportln("Interrupted while waiting for the monitor thread to start!");
+			}
+			MonitorInitializationException exception = monThread.popPendingException();
+			if (exception != null) {
+				throw exception;
 			}
 			this.monitorThreadState.writeLock().unlock();
 		}
