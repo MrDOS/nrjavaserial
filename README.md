@@ -61,12 +61,50 @@ ease of use and embeddability in other libraries.
 
 1. Checkout the repository.
 
-        $ git clone https://github.com/NeuronRobotics/nrjavaserial.git
+   ```
+   $ git clone https://github.com/NeuronRobotics/nrjavaserial.git
+   $ cd nrjavaserial
+   ```
 
-2. Build with Gradle.
+2. Fetch the most appropriate native libraries.
 
-        $ cd nrjavaserial
-        $ ./gradlew build
+   ```
+   $ ./gradlew fetchNativeLibraryBinaries
+   ```
+
+   Native libraries are not stored in the Git repository.
+   If you would prefer to build your own native libraries,
+   see the section below;
+   otherwise, this task will use native libraries from the first available of:
+
+   * The corresponding release,
+     if the HEAD commit is tagged with a version
+     (`git describe --candidates=0 HEAD`).
+   * The newest successful CI build for the HEAD commit
+     (`git rev-parse HEAD`).
+   * The newest successful CI build for the most recent parent commit
+     which modified the contents of `src/main/c/`
+     and which is newer than the most recent release preceding the HEAD commit
+     (`git rev-list --max-count=1 HEAD ^x.y.z -- src/main/c`).
+   * The most recent release preceding the HEAD commit
+     (`git describe --abbrev=0 HEAD`).
+
+> [!NOTE]
+> (TODO: Reword.)
+> The task will check all Git remotes pointing at GitHub.
+> If you've cloned a fork,
+> you will need to configure the authoritative repository
+> as an additional Git remote:
+>
+> ```
+> $ git remote add upstream https://github.com/NeuronRobotics/nrjavaserial.git
+> ```
+
+3. Build with Gradle.
+
+   ```
+   $ ./gradlew build
+   ```
 
 The resulting JAR will be found in the `build/libs/` directory.
 
@@ -207,4 +245,3 @@ Support this project with your organization. Your logo will show up here with a 
 <a href="https://opencollective.com/nrjavaserial/organization/7/website"><img src="https://opencollective.com/nrjavaserial/organization/7/avatar.svg"></a>
 <a href="https://opencollective.com/nrjavaserial/organization/8/website"><img src="https://opencollective.com/nrjavaserial/organization/8/avatar.svg"></a>
 <a href="https://opencollective.com/nrjavaserial/organization/9/website"><img src="https://opencollective.com/nrjavaserial/organization/9/avatar.svg"></a>
-
