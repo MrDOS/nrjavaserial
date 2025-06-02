@@ -42,18 +42,18 @@ jobs:
       # exactly to the directories inside `src/main/c/resources/native`. That
       # way, the Java build job can pull down all artifacts and unpack them
       # into that directory to overwrite the versions in-repo. This is sadly
-      # necessary because the actions/download-artifact@v3 action flattens
+      # necessary because the actions/download-artifact@v4 action flattens
       # paths inside artifacts. If it retained full relative paths, we could
       # put Linux and Windows natives inside the same artifact, and we could be
       # flexible with the artifact names. But it doesn't, so we can't, and we
       # can't.
       - name: Upload Linux native libraries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux
           path: src/main/c/resources/native/linux
       - name: Upload Windows native libraries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: windows
           path: src/main/c/resources/native/windows
@@ -81,7 +81,7 @@ jobs:
           make osx
 
       - name: Upload macOS native libraries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: osx
           path: src/main/c/resources/native/osx/libNRJavaSerial.jnilib
@@ -119,7 +119,7 @@ jobs:
           settarget arm64-freebsd11 make freebsdarm64v8
 
       - name: Upload FreeBSD native libraries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: freebsd
           path: src/main/c/resources/native/freebsd
@@ -152,7 +152,7 @@ jobs:
           cache: gradle
 
       - name: Download native libraries
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: src/main/c/resources/native
 
@@ -163,7 +163,7 @@ jobs:
         id: vars
         run: echo "short-rev=$(git rev-parse --short HEAD)" >>$GITHUB_OUTPUT
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: nrjavaserial-${{steps.vars.outputs.short-rev}}
           path: build/libs/*.jar
