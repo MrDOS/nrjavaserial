@@ -8,7 +8,7 @@ jobs:
     name: Linux (x86/ARM/PPC) and Windows native library compilation
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:18.04
+      image: ubuntu:20.04
       env:
         GCC: gcc-8
 
