@@ -137,7 +137,6 @@ struct event_info_struct
 	jclass jclazz;
 	jmethodID send_event;
 	jmethodID checkMonitorThread;
-	struct event_info_struct *next, *prev;
 	fd_set rfds;
 	struct timeval tv_sleep;
 	int closing;

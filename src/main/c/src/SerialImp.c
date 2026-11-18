@@ -191,8 +191,6 @@ int cfmakeraw ( struct termios *term )
 }
 #endif /* __sun__  || __hpux__ */
 
-struct event_info_struct *master_index = NULL;
-
 int localOpen(const char * name,int flags){
 	int result=OPEN(name,flags);
 	return result;
@@ -1489,9 +1487,6 @@ RXTXPort.writeByte
 JNIEXPORT void JNICALL RXTXPort(writeByte)( JNIEnv *env,
 	jobject jobj, jint ji, jboolean interrupted )
 {
-#ifndef TIOCSERGETLSR
-	struct event_info_struct *index = master_index;
-#endif
 	unsigned char byte = (unsigned char)ji;
 	int fd = get_java_var( env, jobj,"fd","I" );
 	int result;
@@ -1523,13 +1518,10 @@ JNIEXPORT void JNICALL RXTXPort(writeByte)( JNIEnv *env,
 #ifndef TIOCSERGETLSR
 	if( ! interrupted )
 	{
-		index = master_index;
-		if( index )
-		{
-			while( index->fd != fd &&
-				index->next ) index = index->next;
+		struct event_info_struct *eis = (struct event_info_struct *) get_java_var_long(env, jobj, "eis", "J");
+		if (eis) {
+			eis->writing = 1;
 		}
-		index->writing = 1;
 		report( "writeByte:  index->writing = 1" );
 	}
 #endif
@@ -1561,9 +1553,6 @@ JNIEXPORT void JNICALL RXTXPort(writeArray)( JNIEnv *env,
 	jobject jobj, jbyteArray jbarray, jint offset, jint count,
 		jboolean interrupted )
 {
-#ifndef TIOCSERGETLSR
-	struct event_info_struct *index = master_index;
-#endif /* TIOCSERGETLSR */
 	int fd;
 	int result=0,total=0;
 	jbyte *body;
@@ -1617,13 +1606,12 @@ JNIEXPORT void JNICALL RXTXPort(writeArray)( JNIEnv *env,
 #ifndef TIOCSERGETLSR
 	if( !interrupted )
 	{
-		if( index )
+		struct event_info_struct *eis = (struct event_info_struct *) get_java_var_long(env, jobj, "eis", "J");
+		if (eis)
 		{
-			while( index->fd != fd &&
-				index->next ) index = index->next;
+			eis->writing = 1;
+			report( "writeArray:  index->writing = 1" );
 		}
-		index->writing = 1;
-		report( "writeArray:  index->writing = 1" );
 	}
 #endif /* TIOCSERGETLSR */
 	/*
@@ -4130,7 +4118,6 @@ int initialise_event_info_struct( struct event_info_struct *eis )
 	int i;
 	jobject jobj = *eis->jobj;
 	JNIEnv *env = eis->env;
-	struct event_info_struct *index = master_index;
 
 	if ( eis->initialised == 1 )
 		goto end;
@@ -4138,23 +4125,6 @@ int initialise_event_info_struct( struct event_info_struct *eis )
 #ifdef TIOCGICOUNT
 	memset(&eis->osis,0,sizeof(eis->osis));
 #endif /* TIOCGICOUNT */
-
-	if( index )
-	{
-		while( index->next )
-		{
-			index = index->next;
-		}
-		index->next = eis;
-		eis->prev = index;
-		eis->next = NULL;
-	}
-	else
-	{
-		master_index = eis;
-		master_index->next = NULL;
-		master_index->prev = NULL;
-	}
 
 	for( i = 0; i < 11; i++ ) eis->eventflags[i] = 0;
 #if !defined(TIOCSERGETLSR) && !defined(WIN32)
@@ -4213,19 +4183,6 @@ void finalize_event_info_struct( struct event_info_struct *eis )
 	{
 		(*eis->env)->DeleteLocalRef( eis->env, eis->jclazz );
 	}
-	if( eis->next && eis->prev )
-	{
-		eis->prev->next = eis->next;
-		eis->next->prev = eis->prev;
-	}
-	else if( eis->next )
-	{
-		eis->next->prev = NULL;
-		master_index = eis->next;
-	}
-	else if( eis->prev )
-		eis->prev->next = NULL;
-	else master_index = NULL;
 }
 
 /*----------------------------------------------------------
@@ -4927,29 +4884,9 @@ JNIEXPORT jint JNICALL RXTXPort(getOutputBufferSize)(JNIEnv *env,
 JNIEXPORT void JNICALL RXTXPort(interruptEventLoop)(JNIEnv *env,
 	jobject jobj)
 {
-	struct event_info_struct *index = master_index;
-	int fd = get_java_var( env, jobj, "fd", "I" );
-	int searching = 1;
+	struct event_info_struct *eis = (struct event_info_struct *) get_java_var_long(env, jobj, "eis", "J");
 
-
-	while( searching )
-	{
-		index = master_index;
-		if( index )
-		{
-			while( index->fd != fd &&
-				index->next ) index = index->next;
-			if ( index->fd == fd ) searching = 0;
-		}
-		else
-			report("x");
-		if( searching )
-		{
-			report("@");
-			usleep(1000);
-		}
-	}
-	index->eventloop_interrupted = 1;
+	eis->eventloop_interrupted = 1;
 	/*
 	Many OS's need a thread running to determine if output buffer is
 	empty.  For Linux and Win32 it is not needed.  So closing is used to
@@ -4959,14 +4896,14 @@ JNIEXPORT void JNICALL RXTXPort(interruptEventLoop)(JNIEnv *env,
 	In rxtx TIOCSERGETLSR is defined for win32 and Linux
 	*/
 #ifdef TIOCSERGETLSR
-	index->closing=1;
+	eis->closing = 1;
 #endif /* TIOCSERGETLSR */
 #ifdef WIN32
-	termios_interrupt_event_loop( index->fd, 1 );
+	termios_interrupt_event_loop( eis->fd, 1 );
 #endif /* WIN32 */
 #if !defined(TIOCSERGETLSR) && !defined(WIN32)
 	/* make sure that the drainloop unblocks from tcdrain */
-	pthread_kill(index->drain_tid, SIGABRT);
+	pthread_kill(eis->drain_tid, SIGABRT);
 	/* TODO use wait/join/SIGCHLD/?? instead of sleep? */
 	usleep(50 * 1000);
 	/*
@@ -4976,17 +4913,17 @@ JNIEXPORT void JNICALL RXTXPort(interruptEventLoop)(JNIEnv *env,
 	to close indefinetly.
 	*/
 #if defined(__APPLE__)
-	index->closing = 1;
+	eis->closing = 1;
 	/* Continuing on OS X causes an invalid memory access. */
 	return;
 #endif
-	if (index->drain_loop_running != 0) {
+	if (eis->drain_loop_running != 0) {
 		/* good bye tcdrain, and thanks for all the fish */
 		report("interruptEventLoop: canceling blocked drain thread\n");
-		pthread_cancel(index->drain_tid);
-		index->drain_loop_running = 0;
+		pthread_cancel(eis->drain_tid);
+		eis->drain_loop_running = 0;
 	}
-	index->closing = 1;
+	eis->closing = 1;
 #endif
 	report("interruptEventLoop: interrupted\n");
 }
@@ -5035,25 +4972,16 @@ JNIEXPORT void JNICALL RXTXPort(nativeSetEventFlag)( JNIEnv *env,
 							jint event,
 							jboolean flag )
 {
-	struct event_info_struct *index = master_index;
+	struct event_info_struct *eis = (struct event_info_struct *) get_java_var_long(env, jobj, "eis", "J");
+	if (!eis)
+	{
+		report_error("nativeSetEventFlag !eis\n");
+		return;
+	}
 
-	if( !index )
-	{
-		report_error("nativeSetEventFlag !index\n");
-		return;
-	}
-	while( index->fd != fd && index->next )
-	{
-		index = index->next;
-	}
-	if( index->fd != fd )
-	{
-		report_error("nativeSetEventFlag !fd\n");
-		return;
-	}
-	index->eventflags[event] = (int) flag;
+	eis->eventflags[event] = (int) flag;
 #ifdef WIN32
-	termios_setflags( fd, index->eventflags );
+	termios_setflags(fd, eis->eventflags);
 #endif /* win32 */
 
 }
@@ -6077,7 +6005,7 @@ int is_device_locked( const char *port_filename )
 			report_warning( message );
 			return 1;
 		}
-		if ( ( read( fd, pid_buffer, 11 ) ) < 0 ) 
+		if ( ( read( fd, pid_buffer, 11 ) ) < 0 )
 		{
 			snprintf( message, sizeof(message),
 					"RXTX is_device_locked() Error: reading lock file: %s: %s\n",
