@@ -1365,7 +1365,7 @@ static void warn_sig_abort( int signo )
 /*----------------------------------------------------------
 init_threads( )
 
-   accept:      none
+   accept:      the JNI environment; the RXTXPort; the event_info_struct
    perform:
    return:      none
    exceptions:  none
@@ -1374,9 +1374,8 @@ init_threads( )
    from the monitor thread. On systems !WIN32 and without TIOCSERGETLSR
    it will create a new thread looping a call to tcdrain.
 ----------------------------------------------------------*/
-int init_threads( struct event_info_struct *eis )
+int init_threads(JNIEnv *env, jobject port, struct event_info_struct *eis)
 {
-	jfieldID jeis;
 #if !defined(TIOCSERGETLSR) & !defined(WIN32)
 	sigset_t newmask, oldmask;
 	struct sigaction newaction, oldaction;
@@ -1423,10 +1422,25 @@ int init_threads( struct event_info_struct *eis )
 	eis->drain_tid = tid;
 	eis->drain_loop_running = 1;
 #endif /* TIOCSERGETLSR */
-	report("init_threads: get eis\n");
-	jeis  = (*eis->env)->GetFieldID( eis->env, eis->jclazz, "eis", "J" );
+
+	report("init_threads: get eis field\n");
+	jclass rxtxPortClass = (*env)->GetObjectClass(env, port);
+	if (!rxtxPortClass)
+	{
+		return 0;
+	}
+
+	jfieldID eisField = (*env)->GetFieldID(env, rxtxPortClass, "eis", "J");
+	if (!eisField)
+	{
+		return 0;
+	}
+
 	report("init_threads: set eis\n");
-	(*eis->env)->SetLongField(eis->env, *eis->jobj, jeis, ( size_t ) eis );
+	(*env)->SetLongField(env, port, eisField, (size_t) eis);
+
+	(*env)->DeleteLocalRef(env, rxtxPortClass);
+
 	report("init_threads:  stop\n");
 	report_time_end( );
 	return( 1 );
@@ -1648,7 +1662,7 @@ JNIEXPORT jboolean JNICALL RXTXPort(nativeDrain)( JNIEnv *env,
 #endif /* !TIOCSERGETLSR !WIN32 */
 	if( eis && eis->eventflags[SPE_OUTPUT_BUFFER_EMPTY] )
 	{
-		send_event( eis, SPE_OUTPUT_BUFFER_EMPTY, 1 );
+		send_event(env, jobj, eis, SPE_OUTPUT_BUFFER_EMPTY, 1);
 	}
 	report_time_end( );
 	return( JNI_FALSE );
@@ -3732,32 +3746,52 @@ fail:
 /*----------------------------------------------------------
 unlock_monitor_thread
 
-   accept:      event_info_struct
+   accept:      JNI environment; the RXTXPort; the event_info_struct
    perform:     unlock the monitor thread so event notification can start.
    return:      none
    exceptions:  none
    comments:    Events can be missed otherwise.
 ----------------------------------------------------------*/
-
-void unlock_monitor_thread( struct event_info_struct *eis )
+void unlock_monitor_thread(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis)
 {
-	JNIEnv *env = eis->env;
-	jobject jobj = *(eis->jobj);
+	jclass rxtxPortClass = (*env)->GetObjectClass(env, port);
+	if (!rxtxPortClass)
+	{
+		return;
+	}
 
-	jfieldID jfid = (*env)->GetFieldID( env, (*env)->GetObjectClass( env, jobj ), "MonitorThreadLock", "Z" );
-	(*env)->SetBooleanField( env, jobj, jfid, (jboolean) 0 );
+	jfieldID monitorThreadLockField = (*env)->GetFieldID(
+		env,
+		rxtxPortClass,
+		"MonitorThreadLock",
+		"Z"
+	);
+	if (!monitorThreadLockField)
+	{
+		return;
+	}
+
+	(*env)->SetBooleanField(env, port, monitorThreadLockField, JNI_FALSE);
+
+	(*env)->DeleteLocalRef(env, rxtxPortClass);
 }
 
 /*----------------------------------------------------------
 check_line_status_register
 
-   accept:      event_info_struct
+   accept:      the JNI environment; the RXTXPort; the event_info_struct
    perform:     check for changes on the LSR
    return:      0 on success
    exceptions:  none
    comments:    not supported on all devices/drivers.
 ----------------------------------------------------------*/
-int check_line_status_register( struct event_info_struct *eis )
+int check_line_status_register(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis)
 {
 #ifdef TIOCSERGETLSR
 	struct stat fstatbuf;
@@ -3782,7 +3816,7 @@ int check_line_status_register( struct event_info_struct *eis )
 	else if( eis && eis->change )
 	{
 		report_verbose( "check_line_status_register: sending OUTPUT_BUFFER_EMPTY\n" );
-		send_event( eis, SPE_OUTPUT_BUFFER_EMPTY, 1 );
+		send_event(env, port, eis, SPE_OUTPUT_BUFFER_EMPTY, 1);
 	}
 #else
 /*
@@ -3792,9 +3826,9 @@ int check_line_status_register( struct event_info_struct *eis )
 		eis->eventflags[SPE_OUTPUT_BUFFER_EMPTY] )
 	{
 		report_verbose("check_line_status_register: sending SPE_OUTPUT_BUFFER_EMPTY\n");
-		send_event( eis, SPE_OUTPUT_BUFFER_EMPTY, 1 );
+		send_event(env, port, eis, SPE_OUTPUT_BUFFER_EMPTY, 1);
 /*
-		send_event( eis, SPE_DATA_AVAILABLE, 1 );
+		send_event(env, port, eis, SPE_DATA_AVAILABLE, 1);
 */
 		eis->output_buffer_empty_flag = 0;
 	}
@@ -3829,7 +3863,7 @@ int has_line_status_register_access( int fd )
 /*----------------------------------------------------------
 check_cgi_count
 
-   accept:      fd of interest
+   accept:      the JNI environment; the RXTXPort; the event_info_struct
    perform:     check for access to TIOCGICOUNT
    return:      0 if not available
    exceptions:  none
@@ -3841,7 +3875,7 @@ check_cgi_count
 	 *      be notified of data available or errors.
 	 *	ret=ioctl(fd,TIOCMIWAIT);
 ----------------------------------------------------------*/
-void check_cgi_count( struct event_info_struct *eis )
+void check_cgi_count(JNIEnv *env, jobject port, struct event_info_struct *eis)
 {
 #if defined(TIOCGICOUNT)
 
@@ -3856,19 +3890,19 @@ void check_cgi_count( struct event_info_struct *eis )
 		return;
 	}
 	while( eis && sis.frame != eis->osis.frame ) {
-		send_event( eis, SPE_FE, 1);
+		send_event(env, port, eis, SPE_FE, 1);
 		eis->osis.frame++;
 	}
 	while( eis && sis.overrun != eis->osis.overrun ) {
-		send_event( eis, SPE_OE, 1);
+		send_event(env, port, eis, SPE_OE, 1);
 		eis->osis.overrun++;
 	}
 	while( eis && sis.parity != eis->osis.parity ) {
-		send_event( eis, SPE_PE, 1);
+		send_event(env, port, eis, SPE_PE, 1);
 		eis->osis.parity++;
 	}
 	while( eis && sis.brk != eis->osis.brk ) {
-		send_event( eis, SPE_BI, 1);
+		send_event(env, port, eis, SPE_BI, 1);
 		eis->osis.brk++;
 	}
 	if( eis )
@@ -3917,14 +3951,21 @@ check_tiocmget_changes
    return:      none
    exceptions:  none
    comments:    not supported on all devices/drivers.
+                Consider renaming to generate_status_events().
 ----------------------------------------------------------*/
-void check_tiocmget_changes( struct event_info_struct * eis )
+void check_tiocmget_changes(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis)
 {
 	unsigned int mflags = 0;
-	int change;
+	jboolean change;
 
 	/* DORITO */
-	if( !eis ) return;
+	if (!eis) {
+		return;
+	}
+
 	change  = eis->change;
 
 	report_verbose("entering check_tiocmget_changes\n");
@@ -3936,23 +3977,29 @@ void check_tiocmget_changes( struct event_info_struct * eis )
 	}
 
 	change = (mflags&TIOCM_CTS) - (eis->omflags&TIOCM_CTS);
-	if( eis && change ) send_event( eis, SPE_CTS, change );
+	if (change) {
+		send_event(env, port, eis, SPE_CTS, change);
+	}
 
 	change = (mflags&TIOCM_DSR) - (eis->omflags&TIOCM_DSR);
-	if( eis && change )
+	if (change)
 	{
 		report( "sending DSR ===========================\n");
-		send_event( eis, SPE_DSR, change );
+		send_event(env, port, eis, SPE_DSR, change);
 	}
 
 	change = (mflags&TIOCM_RNG) - (eis->omflags&TIOCM_RNG);
-	if( eis && change ) send_event( eis, SPE_RI, change );
+	if (change) {
+		send_event(env, port, eis, SPE_RI, change);
+	}
 
 	change = (mflags&TIOCM_CD) - (eis->omflags&TIOCM_CD);
-	if( eis && change ) send_event( eis, SPE_CD, change );
+	if (change) {
+		send_event(env, port, eis, SPE_CD, change);
+	}
 
-	if( eis )
-		eis->omflags = mflags;
+	eis->omflags = mflags;
+
 	report_verbose("leaving check_tiocmget_changes\n");
 }
 
@@ -4027,19 +4074,27 @@ report_serial_events
    exceptions:  none
    comments:    not supported on all devices/drivers.
 ----------------------------------------------------------*/
-void report_serial_events( struct event_info_struct *eis )
+void report_serial_events(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis)
 {
 	/* JK00: work around for Multi IO cards without TIOCSERGETLSR */
 	/* if( eis->has_tiocsergetlsr ) we have a fix for output empty */
-		if( check_line_status_register( eis ) )
+		if (check_line_status_register(env, port, eis))
+		{
 			return;
+		}
 
 	if ( eis && eis->has_tiocgicount )
-		check_cgi_count( eis );
+	{
+		check_cgi_count(env, port, eis);
+	}
 #ifndef WIN32 /* something is wrong here */
 #endif /* WIN32 */
 
-	check_tiocmget_changes( eis );
+	check_tiocmget_changes(env, port, eis);
+
 	if( eis && port_has_changed_fionread( eis ) )
 	{
 		if(!eis->eventflags[SPE_DATA_AVAILABLE] )
@@ -4056,7 +4111,12 @@ void report_serial_events( struct event_info_struct *eis )
 			return;
 		}
 		report("report_serial_events: sending DATA_AVAILABLE\n");
-		if(!send_event( eis, SPE_DATA_AVAILABLE, 1 ))
+		if (!send_event(
+			env,
+			port,
+			eis,
+			SPE_DATA_AVAILABLE,
+			1))
 		{
 			/* select wont block */
 	/* FIXME: No time to test on all OS's for production */
@@ -4071,17 +4131,18 @@ void report_serial_events( struct event_info_struct *eis )
 /*----------------------------------------------------------
 initialise_event_info_struct
 
-   accept:      event_info_struct for this thread.
+   accept:      the JNI environment; the RXTXPort; the event_info_struct
    perform:     initialise or reset the event_info_struct
    return:      1 on success
    exceptions:  none
    comments:
 ----------------------------------------------------------*/
-int initialise_event_info_struct( struct event_info_struct *eis )
+int initialise_event_info_struct(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis)
 {
 	int i;
-	jobject jobj = *eis->jobj;
-	JNIEnv *env = eis->env;
 
 	if ( eis->initialised == 1 )
 		goto end;
@@ -4098,7 +4159,7 @@ int initialise_event_info_struct( struct event_info_struct *eis )
 	eis->eventloop_interrupted = 0;
 	eis->closing = 0;
 
-	eis->fd = get_java_var( env, jobj, "fd", "I" );
+	eis->fd = get_java_var(env, port, "fd", "I");
 	eis->has_tiocsergetlsr = has_line_status_register_access( eis->fd );
 	eis->has_tiocgicount = driver_has_tiocgicount( eis );
 
@@ -4106,12 +4167,6 @@ int initialise_event_info_struct( struct event_info_struct *eis )
 		report( "initialise_event_info_struct: Port does not support events\n" );
 	}
 
-	eis->send_event = (*env)->GetMethodID( env, eis->jclazz, "sendEvent",
-		"(IZ)Z" );
-	if(eis->send_event == NULL){
-		report_error("initialise_event_info_struct: eis->send_event == NULL!\n");
-		goto fail;
-	}
 end:
 	FD_ZERO( &eis->rfds );
 	if (eis->fd < FD_SETSIZE && eis->fd > 0) {
@@ -4128,25 +4183,7 @@ end:
 		report_error("initialise_event_info_struct: eis->fd <= 0!\n");
 	}
 fail:
-	finalize_event_info_struct( eis );
 	return( 0 );
-}
-
-/*----------------------------------------------------------
-finalize_event_info_struct
-
-   accept:      event_info_struct for this thread.
-   perform:     free resources
-   return:      none
-   exceptions:  none
-   comments:
-----------------------------------------------------------*/
-void finalize_event_info_struct( struct event_info_struct *eis )
-{
-	if( eis->jclazz)
-	{
-		(*eis->env)->DeleteLocalRef( eis->env, eis->jclazz );
-	}
 }
 
 /*----------------------------------------------------------
@@ -4164,22 +4201,28 @@ JNIEXPORT void JNICALL RXTXPort(eventLoop)( JNIEnv *env, jobject jobj )
 	int i = 0;
 #endif /* WIN32 */
 	struct event_info_struct eis;
-	eis.jclazz = (*env)->GetObjectClass( env, jobj );
-	eis.env = env;
-	eis.jobj = &jobj;
 	eis.initialised = 0;
 
 	ENTER( "eventLoop\n" );
-	if ( !initialise_event_info_struct( &eis ) ) goto end;
-	if ( !init_threads( &eis ) ) goto end;
-	unlock_monitor_thread( &eis );
+
+	if (!initialise_event_info_struct(env, jobj, &eis))
+	{
+		goto end;
+	}
+
+	if (!init_threads(env, jobj, &eis))
+	{
+		goto end;
+	}
+
+	unlock_monitor_thread(env, jobj, &eis);
+
 	do{
 		report_time_eventLoop( );
 		do {
 			if(RXTXPort(nativeavailable)( env, jobj )<0){
 				report("eventLoop: Hardware Missing\n");
 				finalize_threads( &eis );
-				finalize_event_info_struct( &eis );
 				LEAVE("eventLoop:error");
 				return;
 			}
@@ -4188,7 +4231,6 @@ JNIEXPORT void JNICALL RXTXPort(eventLoop)( JNIEnv *env, jobject jobj )
 			{
 				report("eventLoop: got interrupt\n");
 				finalize_threads( &eis );
-				finalize_event_info_struct( &eis );
 				LEAVE("eventLoop");
 				return;
 			}
@@ -4215,7 +4257,7 @@ JNIEXPORT void JNICALL RXTXPort(eventLoop)( JNIEnv *env, jobject jobj )
 				{
 					if( port_has_changed_fionread( &eis ) )
 					{
-						send_event( &eis, SPE_DATA_AVAILABLE, 1 );
+						send_event(env, jobj, &eis, SPE_DATA_AVAILABLE, 1);
 					}
 				}
 				usleep(1000);
@@ -4226,9 +4268,13 @@ JNIEXPORT void JNICALL RXTXPort(eventLoop)( JNIEnv *env, jobject jobj )
 		}  while ( eis.ret < 0 && errno == EINTR );
 		if( eis.ret >= 0 )
 		{
-			report_serial_events( &eis );
+			report_serial_events(env, jobj, &eis);
 		}
-		if ( !initialise_event_info_struct( &eis ) ) goto end;
+
+		if (!initialise_event_info_struct(env, jobj, &eis))
+		{
+			goto end;
+		}
 	} while( 1 );
 end:
 	LEAVE( "eventLoop:  Bailing!\n" );
@@ -4895,21 +4941,43 @@ JNIEXPORT void JNICALL RXTXPort(interruptEventLoop)(JNIEnv *env,
 /*----------------------------------------------------------
  is_interrupted
 
-   accept:      event_info_struct
+   accept:      the JNI environment; the RXTXPort; the event_info_struct
    perform:     see if the port is being closed.
    return:      a positive value if the port is being closed.
    exceptions:  none
    comments:
 ----------------------------------------------------------*/
-jboolean is_interrupted( struct event_info_struct *eis )
+jboolean is_interrupted(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis)
 {
 	int result;
-	JNIEnv *env = eis->env;
 
 	ENTER( "is_interrupted" );
 	(*env)->ExceptionClear(env);
-	result = (*env)->CallBooleanMethod( env, *eis->jobj,
-			eis->checkMonitorThread );
+
+	jclass rxtxPortClass = (*env)->GetObjectClass(env, port);
+	if (!rxtxPortClass)
+	{
+		return JNI_TRUE;
+	}
+
+	jmethodID checkMonitorThreadMethod = (*env)->GetMethodID(
+		env,
+		rxtxPortClass,
+		"checkMonitorThread",
+		"Z"
+	);
+	if (!checkMonitorThreadMethod)
+	{
+			return JNI_TRUE;
+	}
+
+	result = (*env)->CallBooleanMethod(env, port, checkMonitorThreadMethod);
+
+	(*env)->DeleteLocalRef(env, rxtxPortClass);
+
 #ifdef DEBUG
 	if((*env)->ExceptionOccurred(env)) {
 		report ( "is_interrupted: an error occured calling sendEvent()\n" );
@@ -4959,12 +5027,19 @@ JNIEXPORT void JNICALL RXTXPort(nativeSetEventFlag)( JNIEnv *env,
    exceptions:  none
    comments:
 ----------------------------------------------------------*/
-int send_event( struct event_info_struct *eis, jint type, int flag )
+int send_event(
+	JNIEnv *env,
+	jobject port,
+	struct event_info_struct *eis,
+	jint type,
+	int flag)
 {
 	int result;
-	JNIEnv *env;
-	if( eis ) env = eis->env;
-	else return(-1);
+
+	if (!eis)
+	{
+		return(-1);
+	}
 
 	ENTER( "send_event" );
 	if( !eis || eis->eventloop_interrupted > 1 )
@@ -4973,15 +5048,39 @@ int send_event( struct event_info_struct *eis, jint type, int flag )
 		return JNI_TRUE;
 	}
 	report_verbose("send_event: !eventloop_interupted\n");
-	if(eis->jclazz == NULL) return JNI_TRUE;
-	report_verbose("send_event: jclazz\n");
 
 	(*env)->ExceptionClear(env);
 
+	jclass rxtxPortClass = (*env)->GetObjectClass(env, port);
+	if (!rxtxPortClass)
+	{
+		return JNI_TRUE;
+	}
+
+	jmethodID sendEventMethod = (*env)->GetMethodID(
+		env,
+		rxtxPortClass,
+		"sendEvent",
+		"(IZ)Z"
+	);
+	if (!sendEventMethod)
+	{
+		return JNI_TRUE;
+	}
+
 	report_verbose("send_event: calling\n");
-	result = (*env)->CallBooleanMethod( env, *eis->jobj, eis->send_event,
-		type, flag > 0 ? JNI_TRUE : JNI_FALSE );
+	result = (*env)->CallBooleanMethod(
+		env,
+		port,
+		sendEventMethod,
+		type,
+		/* We check the sign of flag rather than treating it as a boolean for
+		 * the benefit of check_tiocmget_changes(). */
+		flag > 0 ? JNI_TRUE : JNI_FALSE
+	);
 	report_verbose("send_event: called\n");
+
+	(*env)->DeleteLocalRef(env, rxtxPortClass);
 
 #ifdef asdf
 	if(!eis || (*eis->env)->ExceptionOccurred(eis->env)) {

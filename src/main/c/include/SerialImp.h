@@ -124,7 +124,7 @@ struct event_info_struct
 	int fd;
 	/* flags for events */
 	int eventflags[11];
-	
+
 	int initialised;
 	int ret, change;
 	unsigned int omflags;
@@ -132,11 +132,6 @@ struct event_info_struct
 	int has_tiocsergetlsr;
 	int has_tiocgicount;
 	int eventloop_interrupted;
-	JNIEnv *env;
-	jobject *jobj;
-	jclass jclazz;
-	jmethodID send_event;
-	jmethodID checkMonitorThread;
 	fd_set rfds;
 	struct timeval tv_sleep;
 	int closing;
@@ -469,12 +464,11 @@ int translate_stop_bits( JNIEnv *, tcflag_t *, jint );
 int translate_parity( JNIEnv *, tcflag_t *, jint );
 #endif
 void system_wait();
-void finalize_event_info_struct( struct event_info_struct * );
 int read_byte_array( JNIEnv *, jobject *, int, unsigned char *, int, int );
 size_t get_java_var_long( JNIEnv *, jobject, char *, char * );
 size_t get_java_var( JNIEnv *, jobject, char *, char * );
-jboolean is_interrupted( struct event_info_struct * );
-int send_event(struct event_info_struct *, jint, int );
+jboolean is_interrupted(JNIEnv *, jobject, struct event_info_struct *);
+int send_event(JNIEnv *, jobject, struct event_info_struct *, jint, int);
 void dump_termios(char *,struct termios *);
 void report_verbose(char *);
 void report_error(char *);
